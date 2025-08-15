@@ -8,6 +8,9 @@ st.set_page_config(page_title="Follower Fighters", layout="wide")
 W, H = 1080, 1920   # vertical canvas
 FPS = 30
 
+# Correct path to the directory containing this file
+APP_DIR = pathlib.Path(_file_).parent
+
 # ------------ Sidebar controls ------------
 st.sidebar.header("Follower Fighters")
 N = st.sidebar.slider("Fighters on screen", 8, 60, 12)
@@ -20,8 +23,6 @@ hit_rate = st.sidebar.slider("Hit chance per step (%)", 1, 25, 10)
 damage_min, damage_max = st.sidebar.slider("Damage range", 5, 30, (8, 16))
 
 # ------------ Load avatars from images/ next to app.py ------------
-APP_DIR = pathlib.Path(file).parent
-
 @st.cache_resource
 def load_avatars(folder: str):
     p = pathlib.Path(folder)
