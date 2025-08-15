@@ -8,7 +8,7 @@ st.set_page_config(page_title="Follower Fighters", layout="wide")
 W, H = 1080, 1920   # vertical canvas
 FPS = 30
 
-APP_DIR = pathlib.Path(__file__).parent
+APP_DIR = pathlib.Path(_file_).parent
 
 # ------------ Sidebar controls ------------
 st.sidebar.header("Follower Fighters")
@@ -248,4 +248,3 @@ if st.session_state.running:
         time.sleep(1 / FPS)
 else:
     viewport.image(render(TITLE, SUB), use_container_width=True)
-
