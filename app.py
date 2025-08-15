@@ -6,9 +6,11 @@ from PIL import Image, ImageDraw
 # ------------ Page & constants ------------
 st.set_page_config(page_title="Follower Fighters", layout="wide")
 W, H = 1080, 1920   # vertical canvas
-FPS = 30
+RENDER_FPS = 30     # target render FPS
+SIM_FPS = 60        # physics tick rate (fixed timestep)
+MAX_RUN_SECONDS = 120
 
-# Correct path handling
+# ------------ App dir (robust) ------------
 try:
     APP_DIR = pathlib.Path(__file__).parent
 except NameError:
@@ -51,11 +53,13 @@ if len(avatars) == 0:
     st.error("No images found in ./images. Add .png/.jpg avatars to the images/ folder (next to app.py) and rerun.")
     st.stop()
 
-# ------------ State ------------
+# ------------ Session state (robust init) ------------
 if "fighters" not in st.session_state:
     st.session_state.fighters = []
+if "running" not in st.session_state:
     st.session_state.running = False
-    st.session_state.impacts = []  # transient hit effects
+if "impacts" not in st.session_state:
+    st.session_state.impacts = []
 
 def spawn(n: int):
     F = []
@@ -80,29 +84,21 @@ def spawn(n: int):
 
 def reset():
     st.session_state.fighters = spawn(N)
+    st.session_state.impacts = []
 
 # ------------ Controls ------------
-c1, c2, c3, c4 = st.columns([1,1,1,1])
-if c1.button("Start / Resume"):
+c1, c2, c3 = st.columns(3)
+if c1.button("▶ Start / Resume", use_container_width=True):
     st.session_state.running = True
-if c2.button("Pause"):
+if c2.button("⏸ Pause", use_container_width=True):
     st.session_state.running = False
-if c3.button("Reset"):
+if c3.button("🔄 Reset", use_container_width=True):
     reset()
-if c4.button("Run 20s"):
-    st.session_state.running = True
-    last = time.time()
-    end_time = last + 20.0
-    while time.time() < end_time and st.session_state.running:
-        now = time.time()
-        dt = min(1/20, now - last)
-        last = now
-        step(dt=True)
-    st.session_state.running = False
 
 if len(st.session_state.fighters) == 0:
     reset()
 
+# ------------ Placeholders ------------
 viewport = st.empty()
 winner_placeholder = st.empty()
 
@@ -111,7 +107,7 @@ def sim_step(dt: float):
     F = st.session_state.fighters
     impacts = st.session_state.impacts
 
-    alive_indices = [i for i,a in enumerate(F) if a["alive"]]
+    alive_indices = [i for i, a in enumerate(F) if a["alive"]]
     if len(alive_indices) <= 1:
         return
 
@@ -166,6 +162,7 @@ def sim_step(dt: float):
                 dmg = random.uniform(float(damage_min), float(damage_max))
                 F[j]["hp"] -= dmg
                 a["cool"] = 0.35
+                # small knockback for visibility
                 dx = F[j]["x"] - a["x"]
                 dy = F[j]["y"] - a["y"]
                 dist = (dx*dx + dy*dy) ** 0.5 + 1e-6
@@ -175,7 +172,7 @@ def sim_step(dt: float):
                 if F[j]["hp"] <= 0:
                     F[j]["alive"] = False
 
-    # Age out impacts
+    # Age out impacts (250 ms)
     for imp in impacts:
         imp["age"] += dt
     st.session_state.impacts = [imp for imp in impacts if imp["age"] < 0.25]
@@ -190,13 +187,14 @@ def render(title: str, sub: str):
     draw.text((W // 2, 120), title, fill=(255, 255, 255, 255), anchor="mm")
     draw.text((W // 2, H - 140), sub, fill=(255, 255, 255, 255), anchor="mm")
 
-    alive_indices = [i for i,a in enumerate(F) if a["alive"]]
+    alive_indices = [i for i, a in enumerate(F) if a["alive"]]
 
     # Fighters
     for i in alive_indices:
         f = F[i]
         x, y = int(f["x"]), int(f["y"])
         img.paste(f["img"], (x - 46, y - 46), f["img"])
+        # HP bar
         w, h = 48, 7
         draw.rounded_rectangle((x - w, y - 60, x + w, y - 60 + h),
                                radius=3, fill=(170, 35, 35, 255))
@@ -212,32 +210,67 @@ def render(title: str, sub: str):
         r = int(26 + 20 * a)
         alpha = int(255 * (1 - a))
         x, y = int(imp["x"]), int(imp["y"])
-        draw.ellipse((x - r, y - r, x + r, y + r), outline=(255,255,255,alpha), width=3)
+        draw.ellipse((x - r, y - r, x + r, y + r), outline=(255, 255, 255, alpha), width=3)
 
     # Winner
     if len(alive_indices) == 1:
-        draw.text((W // 2, H // 2), "Winner!", fill=(255,255,255,255), anchor="mm")
+        draw.text((W // 2, H // 2), "Winner!", fill=(255, 255, 255, 255), anchor="mm")
+
     return img
 
-def step(dt=True):
-    dt_val = 1/30 if dt is True else float(dt)
-    sim_step(dt_val)
-    frame = render(TITLE, SUB)
-    viewport.image(frame, use_container_width=True)
-    time.sleep(1 / FPS)
+# ------------ Smooth animation loop ------------
+def run_loop():
+    """Run a smooth fixed-timestep simulation with a capped render FPS."""
+    fixed_dt = 1.0 / SIM_FPS
+    render_dt = 1.0 / RENDER_FPS
+    next_render_time = 0.0
 
-# ------------ Main loop ------------
+    start = time.perf_counter()
+    prev = start
+    accumulator = 0.0
+
+    while st.session_state.running:
+        now = time.perf_counter()
+        frame_dt = now - prev
+        prev = now
+
+        # avoid spiral of death: clamp long pauses
+        if frame_dt > 0.25:
+            frame_dt = 0.25
+
+        accumulator += frame_dt
+
+        # fixed-timestep physics
+        while accumulator >= fixed_dt:
+            sim_step(fixed_dt)
+            accumulator -= fixed_dt
+
+        # render at most RENDER_FPS
+        if (now - start) >= next_render_time:
+            frame = render(TITLE, SUB)
+            viewport.image(frame, use_container_width=True)
+            next_render_time += render_dt
+
+        # end conditions
+        alive = sum(1 for f in st.session_state.fighters if f["alive"])
+        if alive <= 1:
+            # show final frame then stop
+            frame = render(TITLE, SUB)
+            viewport.image(frame, use_container_width=True)
+            st.session_state.running = False
+            break
+
+        # stop after MAX_RUN_SECONDS to avoid runaway CPU on cloud
+        if (now - start) >= MAX_RUN_SECONDS:
+            st.session_state.running = False
+            break
+
+        # tiny sleep to yield CPU (keeps things smooth on Streamlit Cloud)
+        time.sleep(0.001)
+
+# ------------ Run once per page load ------------
 if st.session_state.running:
-    last = time.time()
-    end_time = last + 120
-    while time.time() < end_time and st.session_state.running:
-        now = time.time()
-        dt = min(1/20, now - last)
-        last = now
-        sim_step(dt)
-        frame = render(TITLE, SUB)
-        viewport.image(frame, use_container_width=True)
-        time.sleep(1 / FPS)
+    run_loop()
 else:
+    # static preview when paused
     viewport.image(render(TITLE, SUB), use_container_width=True)
-
