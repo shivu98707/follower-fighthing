@@ -8,7 +8,11 @@ st.set_page_config(page_title="Follower Fighters", layout="wide")
 W, H = 1080, 1920   # vertical canvas
 FPS = 30
 
-APP_DIR = pathlib.Path(_file_).parent
+# Correct path handling
+try:
+    APP_DIR = pathlib.Path(__file__).parent
+except NameError:
+    APP_DIR = pathlib.Path(os.getcwd())
 
 # ------------ Sidebar controls ------------
 st.sidebar.header("Follower Fighters")
@@ -51,7 +55,7 @@ if len(avatars) == 0:
 if "fighters" not in st.session_state:
     st.session_state.fighters = []
     st.session_state.running = False
-    st.session_state.impacts = []  # list of transient hit effects (x,y,age)
+    st.session_state.impacts = []  # transient hit effects
 
 def spawn(n: int):
     F = []
@@ -86,7 +90,6 @@ if c2.button("Pause"):
 if c3.button("Reset"):
     reset()
 if c4.button("Run 20s"):
-    # run a guaranteed 20s loop once
     st.session_state.running = True
     last = time.time()
     end_time = last + 20.0
@@ -94,7 +97,7 @@ if c4.button("Run 20s"):
         now = time.time()
         dt = min(1/20, now - last)
         last = now
-        step(dt=True)  # we’ll define a wrapper below
+        step(dt=True)
     st.session_state.running = False
 
 if len(st.session_state.fighters) == 0:
@@ -110,7 +113,7 @@ def sim_step(dt: float):
 
     alive_indices = [i for i,a in enumerate(F) if a["alive"]]
     if len(alive_indices) <= 1:
-        return  # winner logic handled in render
+        return
 
     for i in alive_indices:
         a = F[i]
@@ -121,7 +124,7 @@ def sim_step(dt: float):
 
         # Clamp speed
         try:
-            s = float((a["vx"]*2 + a["vy"]*2) ** 0.5)
+            s = float((a["vx"]**2 + a["vy"]**2) ** 0.5)
         except Exception:
             s = 0.0
         try:
@@ -149,14 +152,13 @@ def sim_step(dt: float):
 
         # Attack
         if a["cool"] <= 0 and random.random() < (hit_rate / 100.0):
-            # nearest target
             j = -1
             best = 1e18
             for k in alive_indices:
                 if k == i:
                     continue
                 b = F[k]
-                d2 = (b["x"] - a["x"])*2 + (b["y"] - a["y"])*2
+                d2 = (b["x"] - a["x"])**2 + (b["y"] - a["y"])**2
                 if d2 < best:
                     best = d2
                     j = k
@@ -164,22 +166,21 @@ def sim_step(dt: float):
                 dmg = random.uniform(float(damage_min), float(damage_max))
                 F[j]["hp"] -= dmg
                 a["cool"] = 0.35
-                # knock a bit for visibility
                 dx = F[j]["x"] - a["x"]
                 dy = F[j]["y"] - a["y"]
                 dist = (dx*dx + dy*dy) ** 0.5 + 1e-6
                 F[j]["x"] += (dx/dist) * 8
                 F[j]["y"] += (dy/dist) * 8
-                # impact flash
                 impacts.append({"x": F[j]["x"], "y": F[j]["y"], "age": 0.0})
                 if F[j]["hp"] <= 0:
                     F[j]["alive"] = False
 
-    # age out impacts
+    # Age out impacts
     for imp in impacts:
         imp["age"] += dt
-    st.session_state.impacts = [imp for imp in impacts if imp["age"] < 0.25]  # 250ms flash
+    st.session_state.impacts = [imp for imp in impacts if imp["age"] < 0.25]
 
+# ------------ Render ------------
 def render(title: str, sub: str):
     F = st.session_state.fighters
     img = Image.new("RGBA", (W, H), (0, 0, 0, 255))
@@ -196,8 +197,6 @@ def render(title: str, sub: str):
         f = F[i]
         x, y = int(f["x"]), int(f["y"])
         img.paste(f["img"], (x - 46, y - 46), f["img"])
-
-        # HP bar (thicker and clearer)
         w, h = 48, 7
         draw.rounded_rectangle((x - w, y - 60, x + w, y - 60 + h),
                                radius=3, fill=(170, 35, 35, 255))
@@ -207,25 +206,20 @@ def render(title: str, sub: str):
         draw.rounded_rectangle((x - w, y - 60, x - w + gw, y - 60 + h),
                                radius=3, fill=color)
 
-    # Impact flashes (white ring)
+    # Impact flashes
     for imp in st.session_state.impacts:
-        a = imp["age"] / 0.25  # 0..1
+        a = imp["age"] / 0.25
         r = int(26 + 20 * a)
         alpha = int(255 * (1 - a))
         x, y = int(imp["x"]), int(imp["y"])
         draw.ellipse((x - r, y - r, x + r, y + r), outline=(255,255,255,alpha), width=3)
 
-    # Winner banner
+    # Winner
     if len(alive_indices) == 1:
-        idx = alive_indices[0]
         draw.text((W // 2, H // 2), "Winner!", fill=(255,255,255,255), anchor="mm")
-        # also show small name-like placeholder under winner bar
-        # (we don't have usernames; this is purely visual)
     return img
 
 def step(dt=True):
-    # Single iteration: step + render + display
-    now = time.time()
     dt_val = 1/30 if dt is True else float(dt)
     sim_step(dt_val)
     frame = render(TITLE, SUB)
@@ -234,9 +228,7 @@ def step(dt=True):
 
 # ------------ Main loop ------------
 if st.session_state.running:
-    # Reliable while loop for smooth animation
     last = time.time()
-    # Let it run until user pauses or ~120s
     end_time = last + 120
     while time.time() < end_time and st.session_state.running:
         now = time.time()
@@ -248,3 +240,4 @@ if st.session_state.running:
         time.sleep(1 / FPS)
 else:
     viewport.image(render(TITLE, SUB), use_container_width=True)
+
