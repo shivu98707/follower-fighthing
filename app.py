@@ -8,7 +8,7 @@ st.set_page_config(page_title="Follower Fighters", layout="wide")
 W, H = 1080, 1920   # vertical canvas
 FPS = 30
 
-APP_DIR = pathlib.Path(file).parent
+APP_DIR = pathlib.Path(__file__).parent
 
 # ------------ Sidebar controls ------------
 st.sidebar.header("Follower Fighters")
