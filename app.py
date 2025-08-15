@@ -14,13 +14,10 @@ N = st.sidebar.slider("Fighters on screen", 8, 60, 12)
 TITLE = st.sidebar.text_input("Title", "Every follower is a fighter")
 SUB = st.sidebar.text_input("Sub", "Day 1: 9 followers")
 
-# Sliders return numbers, but we guard with float() casts later
+# Sliders return numbers; we still cast before use for safety
 speed = st.sidebar.slider("Average speed", 20, 160, 60)
 hit_rate = st.sidebar.slider("Hit chance per step (%)", 1, 25, 10)
 damage_min, damage_max = st.sidebar.slider("Damage range", 5, 30, (8, 16))
-
-# Optional small diagnostic
-st.sidebar.caption(f"Speed={speed} (type {type(speed)._name_})")
 
 # ------------ Load avatars from images/ next to app.py ------------
 APP_DIR = pathlib.Path(_file_).parent
@@ -28,6 +25,8 @@ APP_DIR = pathlib.Path(_file_).parent
 @st.cache_resource
 def load_avatars(folder: str):
     p = pathlib.Path(folder)
+    if not p.exists():
+        return []
     files = [f for f in p.iterdir() if f.suffix.lower() in (".png", ".jpg", ".jpeg")]
     imgs = []
     for f in files[:120]:
