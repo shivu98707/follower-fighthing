@@ -1,35 +1,38 @@
 import streamlit as st
 import numpy as np
-import time, os, random
+import time, os, random, pathlib
 from PIL import Image, ImageDraw
 
-# -------- Page & constants --------
+# ------------ Page & constants ------------
 st.set_page_config(page_title="Follower Fighters", layout="wide")
 W, H = 1080, 1920   # vertical canvas
 FPS = 30
 
-# -------- Sidebar controls --------
+# ------------ Sidebar controls ------------
 st.sidebar.header("Follower Fighters")
 N = st.sidebar.slider("Fighters on screen", 8, 60, 12)
 TITLE = st.sidebar.text_input("Title", "Every follower is a fighter")
 SUB = st.sidebar.text_input("Sub", "Day 1: 9 followers")
 
+# Sliders return numbers, but we guard with float() casts later
 speed = st.sidebar.slider("Average speed", 20, 160, 60)
 hit_rate = st.sidebar.slider("Hit chance per step (%)", 1, 25, 10)
 damage_min, damage_max = st.sidebar.slider("Damage range", 5, 30, (8, 16))
 
-# -------- Load avatars from images/ --------
+# Optional small diagnostic
+st.sidebar.caption(f"Speed={speed} (type {type(speed)._name_})")
+
+# ------------ Load avatars from images/ next to app.py ------------
+APP_DIR = pathlib.Path(_file_).parent
+
 @st.cache_resource
-def load_avatars(folder="images"):
-    files = []
-    if os.path.isdir(folder):
-        for f in os.listdir(folder):
-            if f.lower().endswith((".png", ".jpg", ".jpeg")):
-                files.append(os.path.join(folder, f))
+def load_avatars(folder: str):
+    p = pathlib.Path(folder)
+    files = [f for f in p.iterdir() if f.suffix.lower() in (".png", ".jpg", ".jpeg")]
     imgs = []
-    for p in files[:120]:
+    for f in files[:120]:
         try:
-            im = Image.open(p).convert("RGBA").resize((92, 92))
+            im = Image.open(f).convert("RGBA").resize((92, 92))
             # circular mask
             m = Image.new("L", im.size, 0)
             d = ImageDraw.Draw(m)
@@ -40,25 +43,28 @@ def load_avatars(folder="images"):
             pass
     return imgs
 
-avatars = load_avatars()
+avatars = load_avatars(folder=str(APP_DIR / "images"))
 if len(avatars) == 0:
-    st.error("No images found in ./images. Add .png/.jpg avatars to the images/ folder and rerun.")
+    st.error("No images found in ./images. Add .png/.jpg avatars to the images/ folder (next to app.py) and rerun.")
     st.stop()
 
-# -------- State --------
+# ------------ State ------------
 if "fighters" not in st.session_state:
     st.session_state.fighters = []
     st.session_state.running = False
 
-def spawn(n):
+def spawn(n: int):
     F = []
     n = int(min(n, len(avatars)))
     for i in range(n):
         x = random.randint(140, W - 140)
         y = random.randint(320, H - 220)
         ang = random.uniform(0, 2 * np.pi)
-        v = float(speed) + np.random.uniform(-0.3 * speed, 0.3 * speed)
-        vx, vy = float(np.cos(ang) * v), float(np.sin(ang) * v)
+        # numeric-safe velocity
+        spd = float(speed)
+        v = spd + float(np.random.uniform(-0.3 * spd, 0.3 * spd))
+        vx = float(np.cos(ang) * v)
+        vy = float(np.sin(ang) * v)
         F.append({
             "x": float(x), "y": float(y),
             "vx": vx, "vy": vy,
@@ -71,7 +77,7 @@ def spawn(n):
 def reset():
     st.session_state.fighters = spawn(N)
 
-# -------- Controls --------
+# ------------ Controls ------------
 c1, c2, c3 = st.columns([1, 1, 1])
 if c1.button("Start / Resume"):
     st.session_state.running = True
@@ -84,7 +90,7 @@ if len(st.session_state.fighters) == 0:
 
 viewport = st.empty()
 
-# -------- Simulation --------
+# ------------ Simulation ------------
 def step(dt: float):
     F = st.session_state.fighters
     for i, a in enumerate(F):
@@ -95,10 +101,17 @@ def step(dt: float):
         a["vx"] += np.random.uniform(-20, 20) * dt
         a["vy"] += np.random.uniform(-20, 20) * dt
 
-        # Clamp speed (FIXED)
-        s = (a["vx"]*2 + a["vy"]*2) ** 0.5
-        maxv = max(20.0, float(speed))
-        if s > maxv:
+        # Clamp speed (numeric-safe)
+        try:
+            s = float((a["vx"]*2 + a["vy"]*2) ** 0.5)
+        except Exception:
+            s = 0.0
+        try:
+            maxv = float(max(20.0, float(speed)))
+        except Exception:
+            maxv = 60.0
+
+        if s > maxv and maxv > 0:
             a["vx"] *= maxv / s
             a["vy"] *= maxv / s
 
@@ -135,11 +148,12 @@ def step(dt: float):
                 if F[j]["hp"] <= 0:
                     F[j]["alive"] = False
 
+# ------------ Render ------------
 def render(title: str, sub: str):
     img = Image.new("RGBA", (W, H), (0, 0, 0, 255))
     draw = ImageDraw.Draw(img)
 
-    # Titles (simple default font)
+    # Titles (default font)
     draw.text((W // 2, 120), title, fill=(255, 255, 255, 255), anchor="mm")
     draw.text((W // 2, H - 140), sub, fill=(255, 255, 255, 255), anchor="mm")
 
@@ -151,22 +165,23 @@ def render(title: str, sub: str):
 
         # HP bar
         w, h = 40, 6
-        # red background
-        draw.rounded_rectangle((x - w, y - 58, x + w, y - 58 + h),
-                               radius=3, fill=(170, 35, 35, 255))
-        # green foreground (turns orange/red when low)
+        draw.rounded_rectangle(
+            (x - w, y - 58, x + w, y - 58 + h),
+            radius=3, fill=(170, 35, 35, 255)
+        )
         pct = max(0.0, min(1.0, f["hp"] / 100.0))
         gw = int((2 * w) * pct)
         color = (40, 200, 90, 255) if pct >= 0.4 else (230, 120, 60, 255)
-        draw.rounded_rectangle((x - w, y - 58, x - w + gw, y - 58 + h),
-                               radius=3, fill=color)
+        draw.rounded_rectangle(
+            (x - w, y - 58, x - w + gw, y - 58 + h),
+            radius=3, fill=color
+        )
     return img
 
-# -------- Main loop --------
+# ------------ Main loop ------------
 if st.session_state.running:
     last = time.time()
-    # Soft cap to avoid runaway loops on Cloud
-    for _ in range(3000):  # ~100s
+    for _ in range(3000):  # ~100s on Cloud
         now = time.time()
         dt = min(1/20, now - last)  # stable stepping
         last = now
