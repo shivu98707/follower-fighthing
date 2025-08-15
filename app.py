@@ -9,7 +9,7 @@ W, H = 1080, 1920   # vertical canvas
 FPS = 30
 
 # Correct path to the directory containing this file
-APP_DIR = pathlib.Path(_file_).parent
+APP_DIR = pathlib.Path(__file__).parent  # <-- fixed here
 
 # ------------ Sidebar controls ------------
 st.sidebar.header("Follower Fighters")
@@ -60,7 +60,6 @@ def spawn(n: int):
         x = random.randint(140, W - 140)
         y = random.randint(320, H - 220)
         ang = random.uniform(0, 2 * np.pi)
-        # numeric-safe velocity
         spd = float(speed)
         v = spd + float(np.random.uniform(-0.3 * spd, 0.3 * spd))
         vx = float(np.cos(ang) * v)
@@ -103,7 +102,7 @@ def step(dt: float):
 
         # Clamp speed (numeric-safe)
         try:
-            s = float((a["vx"]*2 + a["vy"]*2) ** 0.5)
+            s = float((a["vx"]**2 + a["vy"]**2) ** 0.5)  # <-- fixed square calculation
         except Exception:
             s = 0.0
         try:
@@ -137,7 +136,7 @@ def step(dt: float):
             for k, b in enumerate(F):
                 if k == i or not b["alive"]:
                     continue
-                d2 = (b["x"] - a["x"])*2 + (b["y"] - a["y"])*2
+                d2 = (b["x"] - a["x"])**2 + (b["y"] - a["y"])**2  # <-- fixed distance calculation
                 if d2 < best:
                     best = d2
                     j = k
@@ -191,3 +190,4 @@ if st.session_state.running:
         time.sleep(1 / FPS)
 else:
     viewport.image(render(TITLE, SUB), use_container_width=True)
+
