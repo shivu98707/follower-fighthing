@@ -20,7 +20,7 @@ hit_rate = st.sidebar.slider("Hit chance per step (%)", 1, 25, 10)
 damage_min, damage_max = st.sidebar.slider("Damage range", 5, 30, (8, 16))
 
 # ------------ Load avatars from images/ next to app.py ------------
-APP_DIR = pathlib.Path(_file_).parent
+APP_DIR = pathlib.Path(file).parent
 
 @st.cache_resource
 def load_avatars(folder: str):
